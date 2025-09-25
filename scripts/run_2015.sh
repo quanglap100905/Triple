@@ -5,7 +5,7 @@ for LEARNING_RATE in 2e-5
                 for triple_number in 5
                     do
                         CUDA_VISIBLE_DEVICES=1 python model/main_bart.py \
-                        --BATCH_SIZE 16 \
+                        --BATCH_SIZE 4 \
                         --EPOCHS 30 \
                         --LEARNING_RATE ${LEARNING_RATE} \
                         --RANDOM_SEEDS 42 \

@@ -17,8 +17,8 @@ def parse_args(args=None):
         usage='train.py [<args>] [-h | --help]'
     )
 
-    parser.add_argument('--MAX_LEN', type=int, default=300)
-    parser.add_argument("--BATCH_SIZE", type=int, default=8)
+    parser.add_argument('--MAX_LEN', type=int, default=128)
+    parser.add_argument("--BATCH_SIZE", type=int, default=4)
     parser.add_argument("--DROPOUT_PROB", type=float, default=0.1)
     parser.add_argument("--NUM_CLASSES", type=int, default=3)
     parser.add_argument('--EPOCHS', type=int, default=30)
@@ -36,28 +36,29 @@ def parse_args(args=None):
 
 
 class Log(object):
-    def __init__(self, log_dir, name):
-        self.logger = logging.getLogger(name)
+    def __init__(self, log_dir, log_name):
+        os.makedirs(log_dir, exist_ok=True)  # <-- This line creates directories
+        log_file = os.path.join(log_dir, log_name + ".log")
+        
+        self.logger = logging.getLogger(log_name)
         self.logger.setLevel(logging.INFO)
-        formatter = logging.Formatter('%(asctime)s | %(name)s | %(message)s',
-                                      "%Y-%m-%d %H:%M:%S")
-
-        # file handler
-        log_file = os.path.join(log_dir, name + '.log')
+        
+        # File handler
         fh = logging.FileHandler(log_file)
         fh.setLevel(logging.INFO)
+        
+        # Console handler
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.INFO)
+        
+        # Formatter
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
         fh.setFormatter(formatter)
-
-        # console handler
-        sh = logging.StreamHandler()
-        sh.setLevel(logging.INFO)
-        sh.setFormatter(formatter)
-
+        ch.setFormatter(formatter)
+        
+        # Add handlers
         self.logger.addHandler(fh)
-        self.logger.addHandler(sh)
-
-        fh.close()
-        sh.close()
+        self.logger.addHandler(ch)
 
     def get_logger(self):
         return self.logger
@@ -130,35 +131,39 @@ def create_data_loader(df, tokenizer, max_len, batch_size, image_captions, image
     return DataLoader(ds, batch_size=batch_size, num_workers=1)
 
 
-def train_epoch(model, data_loader, loss_fn, optimizer, scheduler, n_examples, tokenizer):
+def train_epoch(model, data_loader, loss_fn, optimizer, scheduler, n_examples, tokenizer, device):
     model = model.train()
-
     losses = []
     correct_predictions = 0
 
     for d in tqdm(data_loader, total=len(data_loader)):
-        input_ids = d["input_ids"].cuda()
-        attention_mask = d["attention_mask"].cuda()
-        decoder_input_ids = d["decoder_input_ids"].cuda()
-        decoder_attention_mask = d["decoder_attention_mask"].cuda()
-        targets = d["targets"].cuda()
-        image_pixels = d["image_pixels"].cuda()
-        visible_matrix = d["visible_matrix"].cuda()
+        # Move tensors to device
+        input_ids = d["input_ids"].to(device)
+        attention_mask = d["attention_mask"].to(device)
+        decoder_input_ids = d["decoder_input_ids"].to(device)
+        decoder_attention_mask = d["decoder_attention_mask"].to(device)
+        targets = d["targets"].to(device)
+        image_pixels = d["image_pixels"].to(device)
+        visible_matrix = d["visible_matrix"].to(device)
 
-        # experiment 1
-        # output = model(input_ids=input_ids, attention_mask=attention_mask, decoder_input_ids = decoder_input_ids, decoder_attention_mask=decoder_attention_mask, labels=targets)
-        # experiment 2
-        # output = model(input_ids=input_ids, attention_mask=attention_mask, decoder_input_ids = decoder_input_ids, decoder_attention_mask=decoder_attention_mask, labels=targets, image_pixels=image_pixels)
-        # experiment 3
-        output = model(input_ids=input_ids, attention_mask=attention_mask, decoder_input_ids = decoder_input_ids, decoder_attention_mask=decoder_attention_mask, labels=targets, image_pixels=image_pixels, extended_attention_mask = visible_matrix)
+        # Forward pass
+        output = model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            decoder_input_ids=decoder_input_ids,
+            decoder_attention_mask=decoder_attention_mask,
+            labels=targets,
+            image_pixels=image_pixels,
+            extended_attention_mask=visible_matrix
+        )
 
         loss = output.loss
         logits = output.logits
         preds = logits.argmax(dim=1)
         correct_predictions += torch.sum(preds == targets).item()
-
         losses.append(loss.item())
 
+        # Backward
         loss.backward()
         nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
@@ -166,6 +171,7 @@ def train_epoch(model, data_loader, loss_fn, optimizer, scheduler, n_examples, t
         optimizer.zero_grad()
 
     return correct_predictions / n_examples, np.mean(losses)
+
 
 
 def format_eval_output(rows):
@@ -184,36 +190,38 @@ def format_eval_output(rows):
     return results_df
 
 
-def eval_model(model, data_loader, loss_fn, n_examples, detailed_results=False, tokenizer=None):
+def eval_model(model, data_loader, loss_fn, n_examples, detailed_results=False, tokenizer=None, device=None):
     model = model.eval()
-
     losses = []
     correct_predictions = 0
     rows = []
 
     with torch.no_grad():
         for d in tqdm(data_loader, total=len(data_loader)):
-            input_ids = d["input_ids"].cuda()
-            attention_mask = d["attention_mask"].cuda()
-            decoder_input_ids = d["decoder_input_ids"].cuda()
-            decoder_attention_mask = d["decoder_attention_mask"].cuda()
-            targets = d["targets"].cuda()
-            image_pixels = d["image_pixels"].cuda()
-            visible_matrix = d["visible_matrix"].cuda()
+            input_ids = d["input_ids"].to(device)
+            attention_mask = d["attention_mask"].to(device)
+            decoder_input_ids = d["decoder_input_ids"].to(device)
+            decoder_attention_mask = d["decoder_attention_mask"].to(device)
+            targets = d["targets"].to(device)
+            image_pixels = d["image_pixels"].to(device)
+            visible_matrix = d["visible_matrix"].to(device)
 
-            # experiment 1
-            # output = model(input_ids=input_ids, attention_mask=attention_mask, decoder_input_ids = decoder_input_ids, decoder_attention_mask=decoder_attention_mask, labels=targets)
-            # experiment 2
-            # output = model(input_ids=input_ids, attention_mask=attention_mask, decoder_input_ids = decoder_input_ids, decoder_attention_mask=decoder_attention_mask, labels=targets, image_pixels=image_pixels)
-            # experiment 3
-            output = model(input_ids=input_ids, attention_mask=attention_mask, decoder_input_ids = decoder_input_ids, decoder_attention_mask=decoder_attention_mask, labels=targets, image_pixels=image_pixels, extended_attention_mask = visible_matrix)
+            output = model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                decoder_input_ids=decoder_input_ids,
+                decoder_attention_mask=decoder_attention_mask,
+                labels=targets,
+                image_pixels=image_pixels,
+                extended_attention_mask=visible_matrix
+            )
 
             loss = output.loss
             logits = output.logits
             preds = logits.argmax(dim=1)
             correct_predictions += torch.sum(preds == targets).item()
-
             losses.append(loss.item())
+
             rows.extend(
                 zip(
                     d["review_text"],
@@ -224,11 +232,8 @@ def eval_model(model, data_loader, loss_fn, n_examples, detailed_results=False, 
             )
 
         if detailed_results:
-            return (
-                correct_predictions / n_examples,
-                np.mean(losses),
-                format_eval_output(rows),
-            )
+            return correct_predictions / n_examples, np.mean(losses), format_eval_output(rows)
 
     return correct_predictions / n_examples, np.mean(losses)
+
 

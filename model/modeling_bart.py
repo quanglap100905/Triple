@@ -801,7 +801,7 @@ class BartEncoder(BartPretrainedModel):
             # # writing by ***
             # 1.construct 0-1 matrix
             image_token_index = torch.nonzero(input_ids==50265)
-            matrix = torch.ones((input_ids.shape[0], input_ids.shape[1], inputs_embeds.shape[-1])).cuda()
+            matrix = torch.ones((input_ids.shape[0], input_ids.shape[1], inputs_embeds.shape[-1]),device=input_ids.device)
             for (i_index,j_index) in image_token_index:
                 matrix[i_index][j_index][:] = 0
             
@@ -809,7 +809,7 @@ class BartEncoder(BartPretrainedModel):
             text_embedding = inputs_embeds * matrix
 
             # 3. image embedding
-            image_emb_new = torch.zeros(text_embedding.shape[0], text_embedding.shape[1], text_embedding.shape[2]).cuda()
+            image_emb_new = torch.zeros(text_embedding.shape[0], text_embedding.shape[1], text_embedding.shape[2],device=input_ids.device)
             for time, (i_index,j_index) in enumerate(image_token_index):
                 image_emb_new[i_index][j_index][:] = image_embedding[time]
             image_emb_new = image_emb_new + (matrix - 1) * -1
